@@ -1,10 +1,13 @@
-enum GameState {
+import { Board, DiscColor } from "./Board.js";
+import { Player } from "./Player.js";
+
+export enum GameState {
     IN_PROGRESS = "IN_PROGRESS",
     WON = "WON",
     DRAW = "DRAW",
 }
 
-class Game {
+export class Game {
     private readonly board: Board;
     private readonly player1: Player;
     private readonly player2: Player;

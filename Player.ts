@@ -1,4 +1,6 @@
-class Player {
+import { DiscColor } from "./Board.js";
+
+export class Player {
     public readonly name: string;
     public readonly color: DiscColor;
 
