@@ -45,3 +45,47 @@ Design a two-player Connect Four game. Players take turns dropping discs into a 
 - Networking / multiplayer over the internet
 - Move undo/replay
 - Game history or save/load functionality
+
+## Entity Relationships
+
+### Main Entities
+
+1. **Game** — Orchestrates the game flow; manages turns, validates moves, detects wins/draws
+2. **Board** — Represents the 7×6 grid; tracks disc placement and state
+3. **Player** — Represents a player (Player 1 or Player 2); tracks whose turn it is
+4. **Disc** — Represents a disc placed by a player; knows its owner and position
+5. **Move** — Represents a player's action (column selection); can be valid or invalid
+6. **GameStatus** — Represents the outcome (win, draw, in-progress); communicates winner
+
+### Relationship Diagram
+
+```
+Game (root/orchestrator)
+├── contains → Board (1:1)
+│   └── contains → Disc (many)
+├── contains → Player (1:2)
+│   └── makes → Move (many, sequential)
+│   └── owns → Disc (many)
+├── produces → GameStatus (1:1)
+└── processes → Move (validates)
+    └── produces → MoveError (if invalid)
+```
+
+### How They Connect
+
+- **Game** creates and owns a single **Board** and two **Players**
+- **Board** holds up to 42 **Discs**, organized in a 7×6 grid
+- Each **Player** makes multiple **Moves** sequentially
+- **Game** validates each **Move** against the **Board** state
+  - Valid moves → **Disc** is placed; **GameStatus** updated
+  - Invalid moves → **MoveError** returned; **Board** unchanged
+- After each valid move, **Game** checks for a winner and updates **GameStatus**
+- **GameStatus** communicates the current state: in-progress, player won, or draw
+
+### Game Flow Example
+
+1. Game starts → creates empty Board and two Players
+2. Player A calls `makeMove(3)` → Game validates column range and availability
+3. Valid move → Disc placed on Board; Game checks for winner
+4. If no winner, turn passes to Player B
+5. Loop until **GameStatus** is "won" or "draw"
