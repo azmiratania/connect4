@@ -66,7 +66,7 @@ Design a two-player Connect Four game. Players take turns dropping discs into a 
   - **Game** validates the game state (must be IN_PROGRESS)
   - **Board.canPlace(column)** checks if the column is valid (0–6) and not full
   - If valid, **Board.placeDisc()** places the disc and returns true
-  - **Game** checks for a winner using `Board.checkWin()`
+  - **Game** checks for a winner using `Board.checkWinAtPosition(row, col, color)`
   - **GameState** updates to WON (if winner found) or DRAW (if board full) or remains IN_PROGRESS
   - **currentPlayerIndex** switches to the other player
 - **Game.getWinner()** returns the winning **Player** or null if no winner yet
@@ -135,21 +135,37 @@ class Board {
     return column >= 0 && column < this.cols && this.grid[0][column] === null;
   }
 
-  checkWin(color: DiscColor): boolean {
-    // Horizontal, vertical, and diagonal checks
-    for (let r = 0; r < this.rows; r++) {
-      for (let c = 0; c < this.cols; c++) {
-        if (
-          this.checkDirection(r, c, 0, 1, color) ||   // horizontal
-          this.checkDirection(r, c, 1, 0, color) ||   // vertical
-          this.checkDirection(r, c, 1, 1, color) ||   // diagonal down-right
-          this.checkDirection(r, c, 1, -1, color)     // diagonal down-left
-        ) {
-          return true;
-        }
-      }
+  // Optimized: Check for win from a specific position (newly placed disc)
+  checkWinAtPosition(row: number, col: number, color: DiscColor): boolean {
+    return (
+      this.countDirection(row, col, 0, 1, color) >= 4 ||   // horizontal
+      this.countDirection(row, col, 1, 0, color) >= 4 ||   // vertical
+      this.countDirection(row, col, 1, 1, color) >= 4 ||   // diagonal down-right
+      this.countDirection(row, col, 1, -1, color) >= 4     // diagonal down-left
+    );
+  }
+
+  private countDirection(row: number, col: number, dr: number, dc: number, color: DiscColor): number {
+    let count = 1; // count the disc at (row, col)
+    
+    // Count in positive direction
+    let r = row + dr, c = col + dc;
+    while (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c] === color) {
+      count++;
+      r += dr;
+      c += dc;
     }
-    return false;
+    
+    // Count in negative direction
+    r = row - dr;
+    c = col - dc;
+    while (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c] === color) {
+      count++;
+      r -= dr;
+      c -= dc;
+    }
+    
+    return count;
   }
 
   isFull(): boolean {
@@ -158,17 +174,6 @@ class Board {
 
   getCell(row: number, column: number): DiscColor | null {
     return this.grid[row][column];
-  }
-
-  private checkDirection(row: number, col: number, dr: number, dc: number, color: DiscColor): boolean {
-    for (let i = 0; i < 4; i++) {
-      const r = row + dr * i;
-      const c = col + dc * i;
-      if (r < 0 || r >= this.rows || c < 0 || c >= this.cols || this.grid[r][c] !== color) {
-        return false;
-      }
-    }
-    return true;
   }
 }
 
@@ -195,10 +200,13 @@ class Game {
     if (this.state !== GameState.IN_PROGRESS) return false;
 
     const currentPlayer = this.getCurrentPlayer();
-    const placed = this.board.placeDisc(column, currentPlayer.getColor());
-    if (!placed) return false;
+    
+    // Try to place the disc and get the row it was placed in
+    const placedRow = this.board.placeDiscAndGetRow(column, currentPlayer.getColor());
+    if (placedRow === -1) return false;
 
-    if (this.board.checkWin(currentPlayer.getColor())) {
+    // Check for win from the newly placed disc
+    if (this.board.checkWinAtPosition(placedRow, column, currentPlayer.getColor())) {
       this.state = GameState.WON;
       this.winner = currentPlayer;
     } else if (this.board.isFull()) {
@@ -222,24 +230,66 @@ class Game {
 
 ## Implementation Notes
 
+### Win Detection Algorithm: `checkWinAtPosition(row, col, color)`
+
+Instead of scanning the entire board, this **optimized approach** checks only the four directions from the newly placed disc:
+
+**Algorithm:**
+1. For each of the 4 directions (horizontal, vertical, and both diagonals):
+   - Count consecutive discs of the same color **starting from (row, col)**
+   - Count both forward and backward along the direction vector
+   - If any direction reaches 4+ discs, return true (winner found)
+
+**Efficiency:**
+- **Time**: O(4) = O(1) per move (instead of O(42) scanning entire board)
+- **Space**: O(1)
+
+**Helper Method: `countDirection(row, col, dr, dc, color)`**
+- Counts consecutive discs from position (row, col) in direction (dr, dc)
+- **dr, dc** represent the direction: 
+  - (0, 1) = horizontal right
+  - (1, 0) = vertical down
+  - (1, 1) = diagonal down-right
+  - (1, -1) = diagonal down-left
+- Expands in **both positive and negative directions** from the center
+- Returns total count (including the center disc)
+
+**Example Walk-Through:**
+
+Board after placing RED at (3, 3):
+```
+  0 1 2 3 4 5 6
+0 . . . . . . .
+1 . . . . . . .
+2 . . . Y . . .
+3 . . R R R . .  ← RED at (3,3)
+4 . . Y R Y . .
+5 . R Y R Y Y R
+```
+
+Checking horizontal (dr=0, dc=1):
+- Start with count = 1 (the disc at 3,3)
+- Positive direction (3,4), (3,5): RED, empty → add 1, total = 2
+- Negative direction (3,2), (3,1): RED, empty → add 1, total = 3
+- Result: 3 < 4, no horizontal win
+
 ### Key Methods
 
-**Board.placeDisc(column, color)**
-- Validates via `canPlace()` first
-- Iterates from bottom to top (highest row index to 0) to find first empty cell
-- Places disc and returns true on success
+**Board.placeDiscAndGetRow(column, color)**
+- Validates and places disc, returns the row index where it was placed
+- Returns -1 if placement failed
 
-**Board.checkWin(color)**
-- Iterates through all cells on the board
-- For each cell, checks all four directions: horizontal, vertical, and two diagonals
-- Returns true if any direction contains four consecutive discs of the same color
+**Board.checkWinAtPosition(row, col, color)**
+- Optimized win detection from a specific position
+- Checks all 4 directions and returns true if any reaches 4+ consecutive discs
 
-**Board.checkDirection(row, col, dr, dc, color)**
-- Checks if four consecutive discs exist starting from (row, col) in direction (dr, dc)
-- dr, dc represent direction deltas: (0, 1) = right, (1, 0) = down, (1, 1) = down-right, (1, -1) = down-left
+**Board.countDirection(row, col, dr, dc, color)**
+- Counts consecutive discs in both directions from center
+- Uses direction vectors to check horizontal, vertical, and diagonal lines
 
 **Game.makeMove(column)**
 - Validates game is still in progress
-- Calls `board.placeDisc()` to attempt placement
-- If successful, checks for win or draw and updates game state
+- Places disc and gets row position
+- Calls `checkWinAtPosition()` from newly placed disc (not entire board)
+- Updates game state and switches player on valid move
 - Returns false if move was invalid or game is over
