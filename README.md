@@ -46,6 +46,277 @@ Design a two-player Connect Four game. Players take turns dropping discs into a 
 - Move undo/replay
 - Game history or save/load functionality
 
+## Design Extensions
+
+The core requirements above describe a fixed two-player game, but the design can stay extensible without making the main game loop more complex. The key shift is to replace hardcoded assumptions (`[Player, Player]`, `1 - this.currentPlayerIndex`, fixed board constants) with parameterized abstractions that still preserve the same gameplay rules.
+
+### Before vs. After
+
+| Concern | Hardcoded design | Extensible design |
+|---------|------------------|-------------------|
+| Players | `[Player, Player]` tuple | `Player[]` array |
+| Turn rotation | `1 - this.currentPlayerIndex` | `(index + 1) % players.length` |
+| Human vs. AI | Branching logic in `Game` | Shared `Player` interface |
+| Board access | Raw mutable grid exposed | `ReadonlyBoard` view passed to players |
+| Rules | Fixed 6×7 board, connect 4 | Configurable rows, cols, and win length |
+
+### Why These Patterns Help
+
+- **Architectural shift: tuple → array**
+  A `[Player, Player]` tuple encodes a two-player assumption directly into the type system. Replacing it with `Player[]` keeps the same semantics for two players while also supporting 3-player or N-player variants with no `Game` rewrite.
+- **`Player` interface pattern**
+  `Game` should ask a player to choose a column, not care whether that player is controlled by a human or an AI. Both become interchangeable implementations of the same contract.
+- **`ReadonlyBoard` pattern**
+  Players need visibility into the board, but they should not be able to mutate internal state. Passing a `ReadonlyBoard` prevents accidental or intentional cheating by AI opponents and preserves encapsulation.
+- **Modulo-based rotation**
+  Conditional alternation only works for exactly two players. Modulo arithmetic generalizes turn order cleanly: after player `n - 1`, rotation wraps back to player `0`.
+
+### Complete Example Implementation
+
+```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// EXTENSIBILITY
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Read-only board view to avoid exposing mutable internal state
+interface ReadonlyBoard {
+  getCell(row: number, col: number): string | null;
+  readonly rows: number;
+  readonly cols: number;
+}
+
+// Player interface — human or AI both implement this
+interface Player {
+  readonly id: string;
+  readonly disc: string;
+
+  // Returns the column index this player wants to drop into
+  chooseColumn(board: ReadonlyBoard): Promise<number>;
+}
+
+// Human player delegates column choice to external input (e.g. UI callback)
+class HumanPlayer implements Player {
+  constructor(
+    public readonly id: string,
+    public readonly disc: string,
+    private readonly getInput: () => Promise<number>
+  ) {}
+
+  chooseColumn(_board: ReadonlyBoard): Promise<number> {
+    return this.getInput();
+  }
+}
+
+// AI player uses a read-only board view — no raw grid exposure
+class AIPlayer implements Player {
+  constructor(
+    public readonly id: string,
+    public readonly disc: string
+  ) {}
+
+  chooseColumn(board: ReadonlyBoard): Promise<number> {
+    return this.chooseStrategicColumn(board);
+  }
+
+  protected async chooseStrategicColumn(board: ReadonlyBoard): Promise<number> {
+    // Simple default strategy: pick a random valid column
+    // Can be replaced by minimax, heuristics, Monte Carlo, etc.
+    const validColumns: number[] = [];
+
+    for (let col = 0; col < board.cols; col++) {
+      if (board.getCell(0, col) === null) {
+        validColumns.push(col);
+      }
+    }
+
+    if (validColumns.length === 0) {
+      throw new Error("No valid columns available");
+    }
+
+    return validColumns[Math.floor(Math.random() * validColumns.length)];
+  }
+}
+
+class Board implements ReadonlyBoard {
+  private readonly grid: (string | null)[][];
+  readonly rows: number;
+  readonly cols: number;
+  private readonly winLength: number;
+
+  constructor(rows = 6, cols = 7, winLength = 4) {
+    this.rows = rows;
+    this.cols = cols;
+    this.winLength = winLength;
+    this.grid = Array.from({ length: rows }, () => Array(cols).fill(null));
+  }
+
+  getCell(row: number, col: number): string | null {
+    return this.grid[row][col];
+  }
+
+  // Returns a read-only view of the board — safe to pass to AI/players
+  asReadonly(): ReadonlyBoard {
+    return this;
+  }
+
+  dropDisc(col: number, disc: string): number | null {
+    for (let row = this.rows - 1; row >= 0; row--) {
+      if (this.grid[row][col] === null) {
+        this.grid[row][col] = disc;
+        return row;
+      }
+    }
+
+    return null; // column full
+  }
+
+  checkWin(disc: string): boolean {
+    return (
+      this.checkDirection(disc, 0, 1) ||   // horizontal
+      this.checkDirection(disc, 1, 0) ||   // vertical
+      this.checkDirection(disc, 1, 1) ||   // diagonal ↘
+      this.checkDirection(disc, 1, -1)     // diagonal ↙
+    );
+  }
+
+  private checkDirection(disc: string, dr: number, dc: number): boolean {
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        let count = 0;
+
+        for (let i = 0; i < this.winLength; i++) {
+          const nr = r + dr * i;
+          const nc = c + dc * i;
+
+          if (nr < 0 || nr >= this.rows || nc < 0 || nc >= this.cols) {
+            break;
+          }
+
+          if (this.grid[nr][nc] !== disc) {
+            break;
+          }
+
+          count++;
+        }
+
+        if (count === this.winLength) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  isFull(): boolean {
+    return this.grid[0].every((cell) => cell !== null);
+  }
+}
+
+// Game accepts any number of players in rotation — supports 2-player, 3-player, AI, etc.
+class Game {
+  private readonly board: Board;
+  private currentPlayerIndex = 0;
+
+  constructor(
+    private readonly players: Player[],
+    rows = 6,
+    cols = 7,
+    winLength = 4
+  ) {
+    if (players.length < 2) {
+      throw new Error("Need at least 2 players.");
+    }
+
+    this.board = new Board(rows, cols, winLength);
+  }
+
+  private get currentPlayer(): Player {
+    return this.players[this.currentPlayerIndex];
+  }
+
+  private advanceTurn(): void {
+    // Fixed rotation works for any number of players
+    this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+  }
+
+  async play(): Promise<void> {
+    while (true) {
+      const player = this.currentPlayer;
+      console.log(`${player.id}'s turn (${player.disc})`);
+
+      // Pass read-only board view — AI cannot mutate internal state
+      const col = await player.chooseColumn(this.board.asReadonly());
+      const row = this.board.dropDisc(col, player.disc);
+
+      if (row === null) {
+        console.log("Column full, try again.");
+        continue; // same player tries again
+      }
+
+      if (this.board.checkWin(player.disc)) {
+        console.log(`${player.id} wins!`);
+        return;
+      }
+
+      if (this.board.isFull()) {
+        console.log("It's a draw!");
+        return;
+      }
+
+      this.advanceTurn();
+    }
+  }
+}
+```
+
+### Usage Examples
+
+```typescript
+// Standard 2-player human game
+const twoPlayerGame = new Game([
+  new HumanPlayer("Alice", "R", async () => 3),
+  new HumanPlayer("Bob", "Y", async () => 4),
+]);
+
+// 2-player game with an AI opponent — Game does not branch on player type
+const vsAIGame = new Game([
+  new HumanPlayer("Alice", "R", async () => 3),
+  new AIPlayer("CPU", "Y"),
+]);
+
+// 3-player variant — rotation works automatically with no Game changes
+const threePlayerGame = new Game([
+  new HumanPlayer("Alice", "R", async () => 1),
+  new HumanPlayer("Bob", "Y", async () => 2),
+  new AIPlayer("CPU", "G"),
+]);
+
+// Configurable board dimensions and rules — 8×9 grid, connect 3 to win
+// (non-standard variant shown intentionally to demonstrate parameterization)
+const customRulesGame = new Game(
+  [
+    new HumanPlayer("Alice", "R", async () => 3),
+    new HumanPlayer("Bob", "Y", async () => 4),
+    new AIPlayer("CPU", "G"),
+  ],
+  8, // rows
+  9, // cols
+  3  // win length
+);
+```
+
+### SOLID Alignment
+
+- **Open/Closed Principle**
+  `Game` is open to new player types and new rule configurations without modifying its main turn loop.
+- **Liskov Substitution Principle**
+  `HumanPlayer` and `AIPlayer` can be substituted anywhere a `Player` is expected.
+- **Dependency Inversion Principle**
+  `Game` depends on the `Player` and `ReadonlyBoard` abstractions instead of concrete UI or AI implementations.
+
+This keeps the original two-player behavior simple while allowing richer variants to grow around the same core architecture.
+
 ## Entity Relationships
 
 ### Main Entities
