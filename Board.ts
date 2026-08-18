@@ -1,9 +1,9 @@
-enum DiscColor {
+export enum DiscColor {
     RED = "RED",
     YELLOW = "YELLOW",
 }
 
-class Board {
+export class Board {
     private readonly rows: number;
     private readonly cols: number;
     private grid: Array<Array<DiscColor | null>>;
