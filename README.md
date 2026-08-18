@@ -53,39 +53,67 @@ Design a two-player Connect Four game. Players take turns dropping discs into a 
 1. **Game** — Orchestrates the game flow; manages turns, validates moves, detects wins/draws
 2. **Board** — Represents the 7×6 grid; tracks disc placement and state
 3. **Player** — Represents a player (Player 1 or Player 2); tracks whose turn it is
-4. **Disc** — Represents a disc placed by a player; knows its owner and position
-5. **Move** — Represents a player's action (column selection); can be valid or invalid
-6. **GameStatus** — Represents the outcome (win, draw, in-progress); communicates winner
+4. **GameState** — Enum representing the current game state (in progress, won, draw)
+5. **DiscColor** — Enum representing disc colors (e.g., Red, Yellow, or player identifiers)
 
-### Relationship Diagram
+### Class Diagrams
 
 ```
-Game (root/orchestrator)
-├── contains → Board (1:1)
-│   └── contains → Disc (many)
-├── contains → Player (1:2)
-│   └── makes → Move (many, sequential)
-│   └── owns → Disc (many)
-├── produces → GameStatus (1:1)
-└── processes → Move (validates)
-    └── produces → MoveError (if invalid)
+class Game:
+    - board: Board
+    - currentPlayer: Player
+    - state: GameState
+    - winner: Player?
+
+    + Game(player1, player2)
+    + makeMove(column) -> bool
+    + getGameState() -> GameState
+    + getWinner() -> Player?
+    + getBoard() -> Board
+
+class Board:
+    - rows: int = 6
+    - cols: int = 7
+    - grid: DiscColor?[rows][cols]
+
+    + canPlace(column) -> bool
+    + getCell(row, column) -> DiscColor?
+
+class Player:
+    - name: string
+    - color: DiscColor
+
+    + getName() -> string
+    + getColor() -> DiscColor
+
+enum GameState:
+    IN_PROGRESS
+    WON
+    DRAW
+
+enum DiscColor:
+    RED
+    YELLOW
+    EMPTY
 ```
 
 ### How They Connect
 
 - **Game** creates and owns a single **Board** and two **Players**
-- **Board** holds up to 42 **Discs**, organized in a 7×6 grid
-- Each **Player** makes multiple **Moves** sequentially
-- **Game** validates each **Move** against the **Board** state
-  - Valid moves → **Disc** is placed; **GameStatus** updated
-  - Invalid moves → **MoveError** returned; **Board** unchanged
-- After each valid move, **Game** checks for a winner and updates **GameStatus**
-- **GameStatus** communicates the current state: in-progress, player won, or draw
+- **Game** tracks the **currentPlayer** (alternates after each valid move) and the **GameState** (in progress, won, or draw)
+- **Board** is a 6×7 2D grid; each cell holds a **DiscColor** (Red, Yellow, or Empty)
+- **Player** has a name and an assigned **DiscColor** (Red or Yellow)
+- When a player calls `makeMove(column)`:
+  - **Game** validates the column (0–6) and calls `Board.canPlace(column)`
+  - If valid, **Game** places the disc and checks for a winner
+  - **GameState** updates to Won (if winner found) or Draw (if board full) or remains In Progress
+  - **currentPlayer** switches to the other player
+- **Game.getWinner()** returns the winning **Player** or null if no winner yet
 
 ### Game Flow Example
 
-1. Game starts → creates empty Board and two Players
-2. Player A calls `makeMove(3)` → Game validates column range and availability
-3. Valid move → Disc placed on Board; Game checks for winner
-4. If no winner, turn passes to Player B
-5. Loop until **GameStatus** is "won" or "draw"
+1. Game starts with two Players; Board is empty; GameState = IN_PROGRESS
+2. Player 1 calls `makeMove(3)` → Game validates and places Red disc in column 3
+3. Game checks for a winner → none found; GameState remains IN_PROGRESS
+4. Player 2's turn → calls `makeMove(4)` → Yellow disc placed in column 4
+5. Loop continues until GameState becomes WON (4 in a row) or DRAW (board full)
