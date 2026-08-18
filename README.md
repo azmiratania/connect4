@@ -59,21 +59,28 @@ Design a two-player Connect Four game. Players take turns dropping discs into a 
 ### How They Connect
 
 - **Game** creates and owns a single **Board** and two **Players**
-- **Game** tracks the **currentPlayerIndex** (alternates after each valid move) and the **GameState** (in progress, won, or draw)
+- **Game** tracks the **currentPlayer** (alternates after each valid move) and the **GameState** (in progress, won, or draw)
 - **Board** is a 6×7 2D grid; each cell holds a **DiscColor** (Red, Yellow, or null/empty)
 - **Player** has a name and an assigned **DiscColor** (Red or Yellow)
 - When a player calls `makeMove(column)`:
   - **Game** validates the game state (must be IN_PROGRESS)
-  - **Board.canPlace(column)** checks if the column is valid (0–6) and not full
-  - If valid, **Board.placeDisc()** places the disc and returns the row index
-  - **Game** checks for a winner using `Board.checkWin(row, col, color)`
+  - Validates column is in range [0, 6] and not full
+  - Places the disc and gets the row index
+  - Checks for a winner using `checkWin(row, col, color)`
   - **GameState** updates to WON (if winner found) or DRAW (if board full) or remains IN_PROGRESS
-  - **currentPlayerIndex** switches to the other player
+  - **currentPlayer** switches to the other player
 - **Game.getWinner()** returns the winning **Player** or null if no winner yet
 
 ## Class Design
 
 ```typescript
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ROWS = 6;
+const COLS = 7;
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ENUMS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -107,36 +114,82 @@ class Player {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BOARD CLASS
+// GAME CLASS
 // ═══════════════════════════════════════════════════════════════════════════
 
-class Board {
-  private rows: number = 6;
-  private cols: number = 7;
+class Game {
   private grid: (DiscColor | null)[][];
+  private players: [Player, Player];
+  private currentPlayer: Player;
+  private state: GameState;
+  private winner: Player | null;
 
-  constructor() {
-    this.grid = Array.from({ length: this.rows }, () => Array(this.cols).fill(null));
+  constructor(player1: Player, player2: Player) {
+    this.grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+    this.players = [player1, player2];
+    this.currentPlayer = player1;
+    this.state = GameState.IN_PROGRESS;
+    this.winner = null;
   }
 
-  // Returns the row index where the disc was placed, or -1 if placement failed
-  placeDisc(column: number, color: DiscColor): number {
-    if (!this.canPlace(column)) return -1;
-    for (let row = this.rows - 1; row >= 0; row--) {
+  // ═══════════════════════════════════════════════════════════════════════
+  // MAIN API
+  // ═══════════════════════════════════════════════════════════════════════
+
+  makeMove(column: number): void {
+    // Validate game is still in progress
+    if (this.state !== GameState.IN_PROGRESS) {
+      throw new Error("Game is already over");
+    }
+
+    // Validate column bounds
+    if (column < 0 || column >= COLS) {
+      throw new Error(`Invalid column: ${column}. Must be between 0 and ${COLS - 1}`);
+    }
+
+    // Validate column is not full
+    if (this.grid[0][column] !== null) {
+      throw new Error(`Column ${column} is full`);
+    }
+
+    // Drop disc into the lowest available row
+    const landingRow = this.placeDisc(column);
+
+    // Check for win
+    if (this.checkWin(landingRow, column, this.currentPlayer.color)) {
+      this.state = GameState.WON;
+      this.winner = this.currentPlayer;
+      return;
+    }
+
+    // Check for draw (board completely full)
+    if (this.isBoardFull()) {
+      this.state = GameState.DRAW;
+      return;
+    }
+
+    // Switch turn to the other player
+    this.currentPlayer =
+      this.currentPlayer === this.players[0] ? this.players[1] : this.players[0];
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // HELPER METHODS
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Returns the row where the disc lands
+  private placeDisc(column: number): number {
+    for (let row = ROWS - 1; row >= 0; row--) {
       if (this.grid[row][column] === null) {
-        this.grid[row][column] = color;
+        this.grid[row][column] = this.currentPlayer.color;
         return row;
       }
     }
-    return -1;
-  }
-
-  canPlace(column: number): boolean {
-    return column >= 0 && column < this.cols && this.grid[0][column] === null;
+    throw new Error(`Column ${column} is full`); // Should not reach here after validation
   }
 
   // Check if placing a disc at (row, col) creates four in a row
-  checkWin(row: number, col: number, color: DiscColor): boolean {
+  private checkWin(row: number, col: number, color: DiscColor): boolean {
     const directions: [number, number][] = [
       [0, 1],   // horizontal
       [1, 0],   // vertical
@@ -150,7 +203,7 @@ class Board {
       // Count in the positive direction
       let r = row + dr;
       let c = col + dc;
-      while (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c] === color) {
+      while (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c] === color) {
         count++;
         r += dr;
         c += dc;
@@ -159,7 +212,7 @@ class Board {
       // Count in the negative direction
       r = row - dr;
       c = col - dc;
-      while (r >= 0 && r < this.rows && c >= 0 && c < this.cols && this.grid[r][c] === color) {
+      while (r >= 0 && r < ROWS && c >= 0 && c < COLS && this.grid[r][c] === color) {
         count++;
         r -= dr;
         c -= dc;
@@ -171,165 +224,95 @@ class Board {
     return false;
   }
 
-  isFull(): boolean {
-    return this.grid[0].every(cell => cell !== null);
+  // Check if board is completely full
+  private isBoardFull(): boolean {
+    return this.grid[0].every((cell) => cell !== null);
   }
 
-  getCell(row: number, column: number): DiscColor | null {
-    return this.grid[row][column];
-  }
-}
+  // ═══════════════════════════════════════════════════════════════════════
+  // QUERY METHODS
+  // ═══════════════════════════════════════════════════════════════════════
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GAME CLASS
-// ═══════════════════════════════════════════════════════════════════════════
-
-class Game {
-  private board: Board;
-  private players: [Player, Player];
-  private currentPlayerIndex: number;
-  private state: GameState;
-  private winner: Player | null;
-
-  constructor(player1: Player, player2: Player) {
-    this.board = new Board();
-    this.players = [player1, player2];
-    this.currentPlayerIndex = 0;
-    this.state = GameState.IN_PROGRESS;
-    this.winner = null;
-  }
-
-  makeMove(column: number): boolean {
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 1: VALIDATE GAME STATE
-    // ═══════════════════════════════════════════════════════════════════════
-    if (this.state !== GameState.IN_PROGRESS) {
-      // Game is already won or drawn — no more moves allowed
-      return false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 2: VALIDATE COLUMN RANGE
-    // ═══════════════════════════════════════════════════════════════════════
-    if (column < 0 || column >= this.board.cols) {
-      // Column out of range [0, 6] — invalid input
-      return false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 3: CHECK IF COLUMN IS FULL
-    // ═══════════════════════════════════════════════════════════════════════
-    if (!this.board.canPlace(column)) {
-      // No empty space in this column — move rejected
-      return false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 4: PLACE DISC & GET ROW
-    // ═══════════════════════════════════════════════════════════════════════
-    const currentPlayer = this.getCurrentPlayer();
-    const placedRow = this.board.placeDisc(column, currentPlayer.getColor());
-
-    if (placedRow === -1) {
-      // Placement failed (should not happen if validation above passed)
-      return false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 5: CHECK FOR WINNER
-    // ═══════════════════════════════════════════════════════════════════════
-    if (this.board.checkWin(placedRow, column, currentPlayer.getColor())) {
-      this.state = GameState.WON;
-      this.winner = currentPlayer;
-      return true; // Move successful; game over
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 6: CHECK FOR DRAW
-    // ═══════════════════════════════════════════════════════════════════════
-    if (this.board.isFull()) {
-      this.state = GameState.DRAW;
-      return true; // Move successful; game over (draw)
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // STEP 7: SWITCH PLAYER & CONTINUE
-    // ═══════════════════════════════════════════════════════════════════════
-    this.currentPlayerIndex = 1 - this.currentPlayerIndex;
-    return true; // Move successful; game continues
-  }
-
-  getCurrentPlayer(): Player {
-    return this.players[this.currentPlayerIndex];
-  }
-
+  getCurrentPlayer(): Player { return this.currentPlayer; }
   getGameState(): GameState { return this.state; }
   getWinner(): Player | null { return this.winner; }
-  getBoard(): Board { return this.board; }
+  getGrid(): (DiscColor | null)[][] { return this.grid; }
 }
 ```
 
 ## Implementation Notes
 
-### `makeMove(column)` - Full Sequence Breakdown
+### `makeMove(column)` - Full Sequence with Exception Handling
 
-The `makeMove` method orchestrates the entire turn: validation, disc placement, win/draw detection, and state updates.
+The `makeMove` method throws exceptions for invalid moves and orchestrates the entire turn: validation, disc placement, win/draw detection, and state updates.
 
 **Return Value:**
-- `true` = move was valid and applied (game continues, is won, or is drawn)
-- `false` = move was invalid; board and state unchanged
+- `void` — returns nothing on success
+- Throws `Error` on any invalid move or game state violation
+
+**Three Validation Checks (Throw Exceptions):**
+
+| Check | Throws | Message |
+|-------|--------|---------|
+| Game already won/drawn | `Error` | "Game is already over" |
+| Column out of range [0, 6] | `Error` | `"Invalid column: X. Must be between 0 and 6"` |
+| Column is full | `Error` | `"Column X is full"` |
 
 **Seven-Step Sequence:**
 
-| Step | Check | Return if Invalid | On Success |
-|------|-------|-------------------|-----------|
-| 1 | Game state is IN_PROGRESS | `false` | Continue to step 2 |
-| 2 | Column in range [0, 6] | `false` | Continue to step 3 |
-| 3 | Column not full (top cell empty) | `false` | Continue to step 4 |
-| 4 | Place disc and get row index | `false` | Continue to step 5 |
-| 5 | Check for winner (4-in-a-row) | `true` (set state=WON, winner=player) | If found, **game over**; otherwise step 6 |
-| 6 | Check for draw (board full) | `true` (set state=DRAW) | If found, **game over**; otherwise step 7 |
-| 7 | Switch to other player | `true` | **Game continues** |
-
-**Invalid Move Scenarios (All Return `false`):**
-
 ```
-1. Game already won or drawn
-   → Attempt blocked; state unchanged
-   
-2. Column < 0 or column > 6
-   → Out-of-range input rejected; state unchanged
-   
-3. Column is full (no empty rows)
-   → Cannot place disc; state unchanged
-   
-4. Internal: placeDisc returns -1
-   → Placement failed; state unchanged
+1. Validate game state → throw if not IN_PROGRESS
+2. Validate column range [0, 6] → throw if invalid
+3. Validate column not full → throw if grid[0][column] is not null
+4. Place disc → get landing row
+5. Check for winner (4-in-a-row)
+   → if found: state = WON, winner = currentPlayer, return
+6. Check for draw (board full)
+   → if found: state = DRAW, return
+7. Switch to other player → currentPlayer = other, return
 ```
 
-**Successful Move Outcomes (All Return `true`):**
+**Why Exceptions Over Boolean?**
 
-```
-1. Normal move (game continues)
-   → Disc placed, no winner, board not full
-   → currentPlayer switches, state = IN_PROGRESS
-   
-2. Winning move
-   → Disc placed, 4-in-a-row detected
-   → state = WON, winner = currentPlayer
-   → Game over; no more moves allowed
-   
-3. Draw move
-   → Disc placed, no winner but board is full
-   → state = DRAW
-   → Game over; no more moves allowed
+This implementation uses exceptions because:
+- **Clearer intent** — An invalid move is an exceptional condition, not a normal game flow
+- **Fail-fast** — No need to check a boolean return value; invalid moves stop execution immediately
+- **Better stack traces** — Exceptions provide context about where and why validation failed
+- **No ambiguity** — You can't accidentally ignore a failed move
+
+**Valid Move Sequence (No Exceptions):**
+
+```typescript
+// Normal gameplay
+game.makeMove(3);  // Alice: RED disc at column 3 → lands at some row
+game.makeMove(4);  // Bob: YELLOW disc at column 4 → lands at some row
+game.makeMove(3);  // Alice: RED disc at column 3 → lands higher (gravity)
+// ... game continues ...
+
+// Eventually a winning move (no exception; state changes)
+game.makeMove(5);  // Alice wins with 4-in-a-row
+// game.getGameState() === GameState.WON
+// game.getWinner() === Alice
+
+// After game is won, any move throws
+game.makeMove(2);  // Throws: "Game is already over"
 ```
 
-**Why Boolean Instead of Exceptions?**
-- Invalid moves are expected and common in games
-- Simpler for callers (no try/catch needed)
-- Board remains in consistent state on rejection
-- Caller can easily check: `if (game.makeMove(3)) { /* update UI */ }`
+**Invalid Move Scenarios (All Throw Exceptions):**
+
+```typescript
+// Column out of range
+game.makeMove(-1);    // Throws: "Invalid column: -1. Must be between 0 and 6"
+game.makeMove(7);     // Throws: "Invalid column: 7. Must be between 0 and 6"
+
+// Column is full
+game.makeMove(0);     // ... fills column 0 over many turns ...
+game.makeMove(0);     // Throws: "Column 0 is full"
+
+// Game already over
+game.makeMove(5);     // Returns normally (winning move, state = WON)
+game.makeMove(2);     // Throws: "Game is already over"
+```
 
 ### State Transition Diagram
 
@@ -339,17 +322,17 @@ IN_PROGRESS (initial state)
 [Player calls makeMove(column)]
     ↓
 [Validate: state, column range, column not full]
-    ├─→ Invalid ──→ Return false (no state change)
+    ├─→ Invalid ──→ Throw Error (no state change)
     │
-    └─→ Valid ──→ [Place disc]
+    └─→ Valid ──→ [Place disc at landing row]
                   ↓
               [Check for 4-in-a-row]
-                  ├─→ Winner found ──→ State = WON, winner set ──→ Return true
+                  ├─→ Winner found ──→ State = WON, winner set, return
                   │
                   └─→ No winner ──→ [Check if board full]
-                                    ├─→ Board full ──→ State = DRAW ──→ Return true
+                                    ├─→ Board full ──→ State = DRAW, return
                                     │
-                                    └─→ Board not full ──→ Switch player ──→ Return true
+                                    └─→ Board not full ──→ Switch player, return
                                                           (State stays IN_PROGRESS)
 ```
 
@@ -360,94 +343,81 @@ const player1 = new Player("Alice", DiscColor.RED);
 const player2 = new Player("Bob", DiscColor.YELLOW);
 const game = new Game(player1, player2);
 
-// Valid moves (game progresses)
-console.log(game.makeMove(3));   // true (Alice places RED)
-console.log(game.makeMove(3));   // true (Bob places YELLOW)
-console.log(game.makeMove(4));   // true (Alice places RED)
+try {
+  // Valid moves (game progresses)
+  game.makeMove(3);   // Alice places RED at column 3
+  game.makeMove(3);   // Bob places YELLOW at column 3 (higher row)
+  game.makeMove(4);   // Alice places RED at column 4
 
-// Invalid moves (rejected)
-console.log(game.makeMove(-1));  // false (column < 0)
-console.log(game.makeMove(7));   // false (column >= 7)
+  // Invalid: column out of range
+  game.makeMove(-1);  // ❌ Throws: "Invalid column: -1. Must be between 0 and 6"
 
-// Eventually, a winning move
-// ... after many moves ...
-console.log(game.makeMove(5));   // true (Alice wins with 4-in-a-row)
+} catch (error) {
+  console.error(error.message);
+}
 
-// Game over: no more moves allowed
-console.log(game.makeMove(2));   // false (game state is WON)
+try {
+  // Fill a column
+  game.makeMove(0);   // ... after several turns, column 0 is full
+  game.makeMove(0);   // ❌ Throws: "Column 0 is full"
 
-// Query final state
-console.log(game.getGameState()); // GameState.WON
-console.log(game.getWinner());    // Player { name: "Alice", color: RED }
+} catch (error) {
+  console.error(error.message);
+}
+
+try {
+  // Eventually, a winning move
+  // ... after many moves ...
+  game.makeMove(5);   // Alice wins with 4-in-a-row
+  console.log(game.getGameState());  // GameState.WON
+  console.log(game.getWinner());     // Alice
+
+  // Game over: no more moves allowed
+  game.makeMove(2);   // ❌ Throws: "Game is already over"
+
+} catch (error) {
+  console.error(error.message);
+}
 ```
-
-### Win Detection Algorithm: `checkWin(row, col, color)`
-
-Checks only the four directions from the newly placed disc (not the entire board):
-
-**Algorithm:**
-1. Define four direction vectors: `[0, 1]`, `[1, 0]`, `[1, 1]`, `[1, -1]`
-2. For each direction:
-   - Start with count = 1 (the newly placed disc)
-   - Count consecutive discs in the **positive direction** (row + dr, col + dc)
-   - Count consecutive discs in the **negative direction** (row - dr, col - dc)
-   - Stop when hitting a different color or board boundary
-   - If total count ≥ 4, return true (winner found)
-3. If no direction has 4+ discs, return false
-
-**Efficiency:**
-- **Time**: O(1) per move (constant 4 directions × constant 7 max discs per line)
-- **Space**: O(1)
-
-**Direction Vectors:**
-- `[0, 1]` = horizontal right (covers left and right from center)
-- `[1, 0]` = vertical down (covers up and down from center)
-- `[1, 1]` = diagonal down-right (covers up-left and down-right from center)
-- `[1, -1]` = diagonal down-left (covers up-right and down-left from center)
-
-**Example Walk-Through:**
-
-Board after placing RED at (3, 3):
-```
-  0 1 2 3 4 5 6
-0 . . . . . . .
-1 . . . . . . .
-2 . . . Y . . .
-3 . . R R R . .  ← RED at (3,3)
-4 . . Y R Y . .
-5 . R Y R Y Y R
-```
-
-Checking horizontal `[0, 1]`:
-- count = 1 (the disc at 3,3)
-- Positive (3,4): RED ✓, (3,5): empty ✗ → add 1, total = 2
-- Negative (3,2): RED ✓, (3,1): empty ✗ → add 1, total = 3
-- Result: 3 < 4, no horizontal win
-
-(Continue for vertical and both diagonals... none reach 4)
-
-Final result: **No win**
 
 ### Key Methods
 
-**Board.placeDisc(column, color)**
-- Validates via `canPlace()` and places disc
-- Iterates from bottom row upward to find first empty cell
-- Returns the row index where placed, or -1 if failed
+**placeDisc(column): number**
+- Finds the lowest empty row in the given column
+- Places current player's disc at that position
+- Returns the row index where disc was placed
+- Throws error if column is somehow full (defensive; should be caught by prior validation)
 
-**Board.checkWin(row, col, color)**
+**checkWin(row, col, color): boolean**
 - Checks all 4 directions from the newly placed disc
 - Returns true if any direction has 4+ consecutive discs of the same color
+- Directions: horizontal, vertical, and both diagonals
+- Uses direction vectors for clean, extensible code
 
-**Board.canPlace(column)**
-- Validates column is in range (0–6)
-- Checks that top cell is empty (column not full)
+**isBoardFull(): boolean**
+- Checks if the top row (row 0) is completely filled
+- If top row is full, entire board must be full (gravity ensures discs stack)
+- Returns true only when no more moves are possible
 
-**Board.isFull()**
-- Returns true if all 7 cells in the top row are filled
-- Indicates the entire board is full (no more moves possible)
+**makeMove(column): void**
+- Orchestrates the complete turn with 3-level validation and 4-step state update
+- Throws exceptions on invalid input or game state violations
+- Board remains unchanged if any validation fails (exception thrown before mutation)
+- On success, returns normally and updates game state
 
-**Game.makeMove(column)**
-- Orchestrates the complete turn with 7-step validation and state update
-- Returns boolean (no exceptions thrown)
-- Board remains unchanged on invalid moves
+### Error Handling Philosophy
+
+**Exceptions as Control Flow:**
+- Invalid moves are treated as exceptions, not normal control flow
+- Callers must wrap moves in try/catch to handle potential errors
+- Forces the caller to explicitly consider error cases
+
+**Defensive Programming:**
+- Validate column range before checking if full
+- Check if full before attempting placement
+- Placement method throws if column is somehow full (extra safety)
+
+**No Silent Failures:**
+- Every invalid move produces an exception with a descriptive message
+- Impossible to accidentally ignore an invalid move
+- Easier to debug: exception stack trace shows exactly where the error occurred
